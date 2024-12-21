@@ -1,0 +1,66 @@
+#!/usr/bin/env python
+import asyncio
+import websockets
+import hashlib
+
+
+def gen_sha256_hmac(message, key):
+    '''
+    Modified to use SHA256
+    '''
+    blocksize = 64
+
+    # aka ipad
+    trans_5C = bytes((x ^ 0x5C) for x in range(256))
+
+    # aka opad
+    trans_36 = bytes((x ^ 0x36) for x in range(256))
+
+    key_hex = key.encode().hex()[2:]
+
+    # Convert hex key to bytes object
+    key_bytes = bytes.fromhex(key_hex)
+
+    # Add a zero-bytes padding to apply to blocksize
+    key_bytes = key_bytes.ljust(blocksize, b'\0')
+
+    # Xor each byte with 0x36 constant
+    xored_key_bytes_ipad = key_bytes.translate(trans_36)
+
+    # Concatenate last value with hex-encoded message and do SHA256 on it
+    h1 = hashlib.sha256(xored_key_bytes_ipad + message.encode())
+
+    # Xor each byte with 0x5C constant
+    xored_key_bytes_opad = key_bytes.translate(trans_5C)
+
+    # Now concatenate last value and previous hash-obj and do SHA256 on it
+    return hashlib.sha256(xored_key_bytes_opad + h1.digest()).hexdigest()
+
+
+async def serve(websocket):  # Убрали 'path'
+    shared_key = "supersecret"
+    access_granted_message = "Access granted!"
+    access_denied_message = "Access denied!"
+    hello_message = "Please provide me a comma-separated message,hmac"
+    await websocket.send(hello_message)
+
+    client_data = await websocket.recv()
+    client_message, client_hmac = client_data.split(",")
+    print(f"Got new message '{client_message}' with HMAC '{client_hmac}'")
+
+    server_side_hmac = gen_sha256_hmac(client_message, shared_key)
+    print(f"Will compare client_HMAC '{client_hmac}' and server_side_HMAC '{server_side_hmac}' with shared_key '{shared_key}'")
+    if client_hmac == server_side_hmac:
+        print(access_granted_message)
+        await websocket.send(access_granted_message)
+    else:
+        print(access_denied_message)
+        await websocket.send(access_denied_message)
+
+
+async def main():
+    print("Server started!")
+    async with websockets.serve(serve, "localhost", 1234):
+        await asyncio.Future()  # Run forever
+
+asyncio.run(main())
